@@ -7,18 +7,29 @@
         define('notify', [], function () {
             return factory(root, document);
         });
+    } else if (typeof exports === 'object') {
+        // CommonJS environment
+        module.exports = factory(root, document);
     } else {
         // Browser environment
         root.Notify = factory(root, document);
     }
 
-}(this, function (w, d) {
+}(window, function (w, d) {
 
     'use strict';
 
+    function isFunction (item) {
+        return typeof item === 'function';
+    }
+
     function Notify(title, options) {
 
-        this.title = typeof title === 'string' ? title : null;
+        if (typeof title !== 'string') {
+            throw new Error('Notify(): first arg (title) must be a string.');
+        }
+
+        this.title = title;
 
         this.options = {
             icon: '',
@@ -29,17 +40,14 @@
             notifyClick: null,
             notifyError: null,
             permissionGranted: null,
-            permissionDenied: null
+            permissionDenied: null,
+            timeout: null
         };
 
         this.permission = null;
 
-        if (!this.isSupported()) {
+        if (!Notify.isSupported) {
             return;
-        }
-
-        if (!this.title) {
-            throw new Error('Notify(): first arg (title) must be a string.');
         }
 
         //User defined options for notification content
@@ -52,62 +60,59 @@
             }
 
             //callback when notification is displayed
-            if (typeof this.options.notifyShow === 'function') {
+            if (isFunction(this.options.notifyShow)) {
                 this.onShowCallback = this.options.notifyShow;
             }
 
             //callback when notification is closed
-            if (typeof this.options.notifyClose === 'function') {
+            if (isFunction(this.options.notifyClose)) {
                 this.onCloseCallback = this.options.notifyClose;
             }
 
             //callback when notification is clicked
-            if (typeof this.options.notifyClick === 'function') {
+            if (isFunction(this.options.notifyClick)) {
                 this.onClickCallback = this.options.notifyClick;
             }
 
             //callback when notification throws error
-            if (typeof this.options.notifyError === 'function') {
+            if (isFunction(this.options.notifyError)) {
                 this.onErrorCallback = this.options.notifyError;
-            }
-
-            //callback user grants permission for notification
-            if (typeof this.options.permissionGranted === 'function') {
-                this.onPermissionGrantedCallback = this.options.permissionGranted;
-            }
-
-            //callback user denies permission for notification
-            if (typeof this.options.permissionDenied === 'function') {
-                this.onPermissionDeniedCallback = this.options.permissionDenied;
             }
         }
     }
 
-    Notify.prototype.needsPermission = function () {
-        if ('Notification' in w && Notification.permission === 'granted') {
-            return false;
-        }
-        return true;
-    };
+    // true if the browser supports HTML5 Notification
+    Notify.isSupported = 'Notification' in w;
 
-    Notify.prototype.requestPermission = function () {
-        var that = this;
+    // true if the permission is not granted
+    Notify.needsPermission = !(Notify.isSupported && Notification.permission === 'granted');
+
+    // asks the user for permission to display notifications.  Then calls the callback functions is supplied.
+    Notify.requestPermission = function (onPermissionGrantedCallback, onPermissionDeniedCallback) {
+        if (!Notify.isSupported) {
+            return;
+        }
         w.Notification.requestPermission(function (perm) {
-            that.permission = perm;
-            switch (that.permission) {
-            case 'granted':
-                that.onPermissionGranted();
-                break;
-            case 'denied':
-                that.onPermissionDenied();
-                break;
+            switch (perm) {
+                case 'granted':
+                    Notify.needsPermission = false;
+                    if (isFunction(onPermissionGrantedCallback)) {
+                        onPermissionGrantedCallback();
+                    }
+                    break;
+                case 'denied':
+                    if (isFunction(onPermissionDeniedCallback)) {
+                        onPermissionDeniedCallback();
+                    }
+                    break;
             }
         });
     };
 
+
     Notify.prototype.show = function () {
 
-        if (!this.isSupported()) {
+        if (!Notify.isSupported) {
             return;
         }
 
@@ -117,48 +122,40 @@
             'icon' : this.options.icon
         });
 
+        if (this.options.timeout && !isNaN(this.options.timeout)) {
+            setTimeout(this.close.bind(this), this.options.timeout * 1000);
+        }
+
         this.myNotify.addEventListener('show', this, false);
         this.myNotify.addEventListener('error', this, false);
         this.myNotify.addEventListener('close', this, false);
         this.myNotify.addEventListener('click', this, false);
     };
 
-    Notify.prototype.onShowNotification = function () {
+    Notify.prototype.onShowNotification = function (e) {
         if (this.onShowCallback) {
-            this.onShowCallback();
+            this.onShowCallback(e);
         }
     };
 
-    Notify.prototype.onCloseNotification = function () {
+    Notify.prototype.onCloseNotification = function (e) {
         if (this.onCloseCallback) {
-            this.onCloseCallback();
+            this.onCloseCallback(e);
         }
         this.destroy();
     };
 
-    Notify.prototype.onClickNotification = function () {
+    Notify.prototype.onClickNotification = function (e) {
         if (this.onClickCallback) {
-            this.onClickCallback();
+            this.onClickCallback(e);
         }
     };
 
-    Notify.prototype.onErrorNotification = function () {
+    Notify.prototype.onErrorNotification = function (e) {
         if (this.onErrorCallback) {
-            this.onErrorCallback();
+            this.onErrorCallback(e);
         }
         this.destroy();
-    };
-
-    Notify.prototype.onPermissionGranted = function () {
-        if (this.onPermissionGrantedCallback) {
-            this.onPermissionGrantedCallback();
-        }
-    };
-
-    Notify.prototype.onPermissionDenied = function () {
-        if (this.onPermissionDeniedCallback) {
-            this.onPermissionDeniedCallback();
-        }
     };
 
     Notify.prototype.destroy = function () {
@@ -168,11 +165,8 @@
         this.myNotify.removeEventListener('click', this, false);
     };
 
-    Notify.prototype.isSupported = function () {
-        if ('Notification' in w) {
-            return true;
-        }
-        return false;
+    Notify.prototype.close = function () {
+        this.myNotify.close();
     };
 
     Notify.prototype.handleEvent = function (e) {
