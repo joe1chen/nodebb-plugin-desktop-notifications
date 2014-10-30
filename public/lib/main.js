@@ -37,7 +37,8 @@
 							if (data.path) {
 								ajaxify.go(data.path.substring(1));
 							}
-						}
+						},
+						timeout: 10
 					});
 					notification.show();
 				});
